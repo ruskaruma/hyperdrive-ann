@@ -1,41 +1,42 @@
-# Prerequisites
-*.d
+# Build outputs
+/build/
+/bin/
+/dist/
+/lib/
+/CMakeFiles/
+/CMakeCache.txt
+cmake_install.cmake
+Makefile
 
-# Compiled Object files
-*.slo
-*.lo
+# Compiled objects
 *.o
 *.obj
-
-# Precompiled Headers
-*.gch
-*.pch
-
-# Linker files
-*.ilk
-
-# Debugger Files
-*.pdb
-
-# Compiled Dynamic libraries
+*.a
 *.so
 *.dylib
 *.dll
-
-# Fortran module files
-*.mod
-*.smod
-
-# Compiled Static libraries
-*.lai
-*.la
-*.a
-*.lib
-
-# Executables
 *.exe
-*.out
-*.app
+*.pdb
 
-# debug information files
-*.dwo
+# Python/uv
+.uv/
+uv.lock
+__pycache__/
+*.pyc
+
+# IDEs / Editors
+.vscode/
+.idea/
+*.sln
+*.vcxproj*
+*.code-workspace
+
+# Logs and data
+*.log
+/data/
+*.npy
+*.npz
+
+# System files
+.DS_Store
+Thumbs.db
