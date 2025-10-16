@@ -1,9 +1,13 @@
 #include"ann.hpp"
-#include"kernels.cu"
 #include<cuda_runtime.h>
 #include<iostream>
 #include<algorithm>
 #include<cstring>
+
+// Forward declarations for kernel functions
+void launchSimilarityKernel(const float* db,const float* queries,float* similarities,
+                           int dbCount,int queryCount,int dim,int tileSize,cudaStream_t stream);
+void launchTopKKernel(const float* similarities,int* topK,int dbCount,int queryCount,int k,cudaStream_t stream);
 
 HyperdriveANN::HyperdriveANN():db_device_(nullptr),queries_device_(nullptr),
                                similarities_device_(nullptr),topk_device_(nullptr),

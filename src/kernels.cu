@@ -1,253 +1,104 @@
 #include<cuda_runtime.h>
-#include<device_launch_parameters.h>
 #include<cub/cub.cuh>
-#include<vector>
-#include<algorithm>
+#include<iostream>
 
-__device__ __forceinline__ float warpReduce(float val)
+__global__ void computeSimilaritiesKernel(const float* db,const float* queries,float* similarities,int dbCount,int queryCount,int dim,int tileSize)
 {
-    #pragma unroll
-    for(int offset=16;offset>0;offset/=2)
+    int queryIdx=blockIdx.x;
+    int dbIdx=threadIdx.x+blockIdx.y*blockDim.x;
+    if(queryIdx>=queryCount||dbIdx>=dbCount) return;
+    
+    const float* query=&queries[queryIdx*dim];
+    const float* dbVector=&db[dbIdx*dim];
+    
+    float dot=0.0f;
+    for(int i=0;i<dim;i++)
     {
-        val+=__shfl_down_sync(0xffffffff,val,offset);
+        dot+=query[i]*dbVector[i];
     }
-    return val;
+    
+    similarities[queryIdx*dbCount+dbIdx]=dot;
 }
 
-__device__ __forceinline__ float blockReduce(float val)
+__global__ void findTopKKernel(const float* similarities,int* topK,int dbCount,int queryCount,int k)
 {
-    __shared__ float shared[32];
-    int lane=threadIdx.x%32;
-    int wid=threadIdx.x/32;
+    int queryIdx=blockIdx.x;
+    if(queryIdx>=queryCount) return;
     
-    val=warpReduce(val);
+    __shared__ float sharedSims[1024];
+    __shared__ int sharedIndices[1024];
     
-    if(lane==0)
+    int tid=threadIdx.x;
+    int blockSize=blockDim.x;
+    
+    // Initialize with worst possible values
+    for(int i=tid;i<k;i+=blockSize)
     {
-        shared[wid]=val;
+        sharedSims[i]=-2.0f;
+        sharedIndices[i]=-1;
     }
     __syncthreads();
     
-    if(wid==0)
+    // Process database in chunks
+    for(int start=0;start<dbCount;start+=blockSize)
     {
-        val=(threadIdx.x<blockDim.x/32)?shared[lane]:0.0f;
-        val=warpReduce(val);
-    }
-    
-    return val;
-}
-
-__global__ void computeSimilarities(const float* __restrict__ db,
-                                   const float* __restrict__ queries,
-                                   float* __restrict__ similarities,
-                                   int dbCount,
-                                   int queryCount,
-                                   int dim,
-                                   int tileSize)
-{
-    extern __shared__ float sharedMem[];
-    
-    int queryIdx=blockIdx.x;
-    int dbTile=blockIdx.y;
-    int tid=threadIdx.x;
-    
-    if(queryIdx>=queryCount) return;
-    
-    float* queryTile=&sharedMem[0];
-    float* dbTileData=&sharedMem[tileSize];
-    
-    // Load query vector to shared memory
-    for(int i=tid;i<tileSize&&i<dim;i+=blockDim.x)
-    {
-        queryTile[i]=queries[queryIdx*dim+i];
-    }
-    
-    float sum=0.0f;
-    int dbStart=dbTile*tileSize;
-    int dbEnd=min(dbStart+tileSize,dbCount);
-    
-    // Process database vectors in this tile
-    for(int dbIdx=dbStart;dbIdx<dbEnd;dbIdx++)
-    {
-        // Load database vector to shared memory
-        for(int i=tid;i<tileSize&&i<dim;i+=blockDim.x)
+        int dbIdx=start+tid;
+        float sim=-2.0f;
+        int idx=-1;
+        
+        if(dbIdx<dbCount)
         {
-            dbTileData[i]=db[dbIdx*dim+i];
+            sim=similarities[queryIdx*dbCount+dbIdx];
+            idx=dbIdx;
         }
         __syncthreads();
         
-        // Compute dot product using shared memory
-        float dot=0.0f;
-        for(int i=tid;i<dim;i+=blockDim.x)
+        // Insert into top-k if better than current worst
+        if(sim>sharedSims[k-1])
         {
-            dot+=queryTile[i]*dbTileData[i];
+            // Find insertion point
+            int insertPos=k;
+            for(int i=0;i<k;i++)
+            {
+                if(sim>sharedSims[i])
+                {
+                    insertPos=i;
+                    break;
+                }
+            }
+            
+            // Shift elements and insert
+            if(insertPos<k)
+            {
+                for(int i=k-1;i>insertPos;i--)
+                {
+                    sharedSims[i]=sharedSims[i-1];
+                    sharedIndices[i]=sharedIndices[i-1];
+                }
+                sharedSims[insertPos]=sim;
+                sharedIndices[insertPos]=idx;
+            }
         }
         __syncthreads();
-        
-        // Reduce across block
-        dot=blockReduce(dot);
-        
-        // Store result
-        if(tid==0)
-        {
-            similarities[queryIdx*dbCount+dbIdx]=dot;
-        }
+    }
+    
+    // Copy results
+    if(tid<k)
+    {
+        topK[queryIdx*k+tid]=sharedIndices[tid];
     }
 }
 
-__global__ void findTopK(const float* __restrict__ similarities,
-                        int* __restrict__ indices,
-                        int* __restrict__ topK,
-                        int dbCount,
-                        int queryCount,
-                        int k)
+void launchSimilarityKernel(const float* db,const float* queries,float* similarities,int dbCount,int queryCount,int dim,int tileSize,cudaStream_t stream)
 {
-    int queryIdx=blockIdx.x;
-    int tid=threadIdx.x;
-    
-    if(queryIdx>=queryCount) return;
-    
-    extern __shared__ float sharedSim[];
-    float* sharedIdx=(float*)(sharedSim+dbCount);
-    
-    // Copy similarities to shared memory for this query
-    for(int i=tid;i<dbCount;i+=blockDim.x)
-    {
-        sharedSim[i]=similarities[queryIdx*dbCount+i];
-        sharedIdx[i]=i;
-    }
-    __syncthreads();
-    
-    // Simple selection sort for top-k
-    for(int i=0;i<k;i++)
-    {
-        int maxIdx=i;
-        float maxVal=sharedSim[i];
-        
-        // Find maximum in remaining elements
-        for(int j=i+1;j<dbCount;j++)
-        {
-            if(sharedSim[j]>maxVal)
-            {
-                maxVal=sharedSim[j];
-                maxIdx=j;
-            }
-        }
-        
-        // Swap elements
-        if(maxIdx!=i)
-        {
-            float tempSim=sharedSim[i];
-            float tempIdx=sharedIdx[i];
-            sharedSim[i]=sharedSim[maxIdx];
-            sharedIdx[i]=sharedIdx[maxIdx];
-            sharedSim[maxIdx]=tempSim;
-            sharedIdx[maxIdx]=tempIdx;
-        }
-        
-        // Store result
-        if(tid==0)
-        {
-            topK[queryIdx*k+i]=(int)sharedIdx[i];
-        }
-    }
+    dim3 block(256);
+    dim3 grid(queryCount,(dbCount+block.x-1)/block.x);
+    computeSimilaritiesKernel<<<grid,block,0,stream>>>(db,queries,similarities,dbCount,queryCount,dim,tileSize);
 }
 
-__global__ void batchTopK(const float* __restrict__ similarities,
-                         int* __restrict__ topK,
-                         int dbCount,
-                         int queryCount,
-                         int k)
+void launchTopKKernel(const float* similarities,int* topK,int dbCount,int queryCount,int k,cudaStream_t stream)
 {
-    int queryIdx=blockIdx.x;
-    int tid=threadIdx.x;
-    
-    if(queryIdx>=queryCount) return;
-    
-    // Use shared memory for local sorting
-    extern __shared__ float shared[];
-    float* sims=&shared[0];
-    int* indices=(int*)&shared[dbCount];
-    
-    // Initialize indices
-    for(int i=tid;i<dbCount;i+=blockDim.x)
-    {
-        indices[i]=i;
-    }
-    __syncthreads();
-    
-    // Copy similarities
-    for(int i=tid;i<dbCount;i+=blockDim.x)
-    {
-        sims[i]=similarities[queryIdx*dbCount+i];
-    }
-    __syncthreads();
-    
-    // Partial sort using selection sort
-    for(int i=0;i<k;i++)
-    {
-        int maxIdx=i;
-        float maxVal=sims[i];
-        
-        // Find max in [i, dbCount)
-        for(int j=i+1;j<dbCount;j++)
-        {
-            if(sims[j]>maxVal)
-            {
-                maxVal=sims[j];
-                maxIdx=j;
-            }
-        }
-        
-        // Swap
-        if(maxIdx!=i)
-        {
-            float tempSim=sims[i];
-            int tempIdx=indices[i];
-            sims[i]=sims[maxIdx];
-            indices[i]=indices[maxIdx];
-            sims[maxIdx]=tempSim;
-            indices[maxIdx]=tempIdx;
-        }
-    }
-    
-    // Store top-k results
-    for(int i=tid;i<k;i+=blockDim.x)
-    {
-        topK[queryIdx*k+i]=indices[i];
-    }
-}
-
-void launchSimilarityKernel(const float* db,
-                           const float* queries,
-                           float* similarities,
-                           int dbCount,
-                           int queryCount,
-                           int dim,
-                           int tileSize,
-                           cudaStream_t stream)
-{
-    dim3 grid(queryCount,(dbCount+tileSize-1)/tileSize);
-    dim3 block(min(256,dim));
-    
-    size_t sharedMemSize=(tileSize+dim)*sizeof(float);
-    
-    computeSimilarities<<<grid,block,sharedMemSize,stream>>>(
-        db,queries,similarities,dbCount,queryCount,dim,tileSize);
-}
-
-void launchTopKKernel(const float* similarities,
-                     int* topK,
-                     int dbCount,
-                     int queryCount,
-                     int k,
-                     cudaStream_t stream)
-{
+    dim3 block(256);
     dim3 grid(queryCount);
-    dim3 block(min(256,dbCount));
-    
-    size_t sharedMemSize=(dbCount*sizeof(float)+dbCount*sizeof(int));
-    
-    batchTopK<<<grid,block,sharedMemSize,stream>>>(
-        similarities,topK,dbCount,queryCount,k);
+    findTopKKernel<<<grid,block,0,stream>>>(similarities,topK,dbCount,queryCount,k);
 }

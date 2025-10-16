@@ -15,9 +15,6 @@ if(NOT CUB_INCLUDE_DIR)
 endif()
 include_directories(${CUB_INCLUDE_DIR})
 
-# Set CUDA properties
-set_property(TARGET ${PROJECT_NAME} PROPERTY CUDA_SEPARABLE_COMPILATION ON)
-
 # Include directories
 include_directories(${CMAKE_CURRENT_SOURCE_DIR}/src)
 
@@ -32,12 +29,30 @@ set(ANN_SOURCES
 add_library(${PROJECT_NAME}_lib STATIC ${ANN_SOURCES})
 target_link_libraries(${PROJECT_NAME}_lib CUDA::cudart)
 
+# Set CUDA properties on the library target
+set_property(TARGET ${PROJECT_NAME}_lib PROPERTY CUDA_SEPARABLE_COMPILATION ON)
+
+# Enable CUDA device code linking
+set_target_properties(${PROJECT_NAME}_lib PROPERTIES
+    CUDA_RESOLVE_DEVICE_SYMBOLS ON
+)
+
 # CLI executable
 add_executable(${PROJECT_NAME} src/cli.cpp)
 target_link_libraries(${PROJECT_NAME} ${PROJECT_NAME}_lib CUDA::cudart)
+set_target_properties(${PROJECT_NAME} PROPERTIES
+    CUDA_RESOLVE_DEVICE_SYMBOLS ON
+)
 
 # Data generator executable
 add_executable(gen_data bench/gen_data.cpp)
+
+# Test executable
+add_executable(test_basic tests/test_basic.cpp)
+target_link_libraries(test_basic ${PROJECT_NAME}_lib CUDA::cudart)
+set_target_properties(test_basic PROPERTIES
+    CUDA_RESOLVE_DEVICE_SYMBOLS ON
+)
 
 # Create directories
 file(MAKE_DIRECTORY ${CMAKE_CURRENT_SOURCE_DIR}/src)
