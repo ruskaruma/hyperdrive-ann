@@ -1,0 +1,37 @@
+version: '3.8'
+
+services:
+  hyperdrive-ann:
+    build: .
+    runtime: nvidia
+    environment:
+      - NVIDIA_VISIBLE_DEVICES=all
+      - NVIDIA_DRIVER_CAPABILITIES=compute,utility
+    volumes:
+      - ./data:/workspace/data
+      - ./config:/workspace/config
+      - ./logs:/workspace/logs
+    ports:
+      - "8000:8000"
+    command: ./hyperdrive-ann --go
+
+  hyperdrive-benchmark:
+    build: .
+    runtime: nvidia
+    environment:
+      - NVIDIA_VISIBLE_DEVICES=all
+      - NVIDIA_DRIVER_CAPABILITIES=compute,utility
+    volumes:
+      - ./data:/workspace/data
+      - ./results:/workspace/results
+    command: ./hyperdrive-ann --benchmark
+
+  hyperdrive-test:
+    build: .
+    runtime: nvidia
+    environment:
+      - NVIDIA_VISIBLE_DEVICES=all
+      - NVIDIA_DRIVER_CAPABILITIES=compute,utility
+    volumes:
+      - ./data:/workspace/data
+    command: ./test_basic
