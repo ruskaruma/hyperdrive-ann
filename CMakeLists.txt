@@ -15,6 +15,9 @@ if(NOT CUB_INCLUDE_DIR)
 endif()
 include_directories(${CUB_INCLUDE_DIR})
 
+# Find pybind11 (optional)
+find_package(pybind11 QUIET)
+
 # Include directories
 include_directories(${CMAKE_CURRENT_SOURCE_DIR}/src)
 
@@ -47,12 +50,21 @@ set_target_properties(${PROJECT_NAME} PROPERTIES
 # Data generator executable
 add_executable(gen_data bench/gen_data.cpp)
 
-# Test executable
+# Test executables
 add_executable(test_basic tests/test_basic.cpp)
 target_link_libraries(test_basic ${PROJECT_NAME}_lib CUDA::cudart)
 set_target_properties(test_basic PROPERTIES
     CUDA_RESOLVE_DEVICE_SYMBOLS ON
 )
+
+# Python bindings (if pybind11 is available)
+if(pybind11_FOUND)
+    pybind11_add_module(hyperdrive_ann src/python_bindings.cpp)
+    target_link_libraries(hyperdrive_ann PRIVATE ${PROJECT_NAME}_lib CUDA::cudart)
+    set_target_properties(hyperdrive_ann PROPERTIES
+        CUDA_RESOLVE_DEVICE_SYMBOLS ON
+    )
+endif()
 
 # Create directories
 file(MAKE_DIRECTORY ${CMAKE_CURRENT_SOURCE_DIR}/src)
