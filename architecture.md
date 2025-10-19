@@ -2,7 +2,7 @@
 
 ## System Overview
 
-Hyperdrive-ANN is a GPU-accelerated approximate nearest neighbor (ANN) search engine built with CUDA 12.8 and C++20. The system efficiently computes top-k cosine similarity searches across large vector databases using shared-memory tiling, warp-level reductions, and occupancy-aware block sizing.
+Hyperdrive-ANN is a production-ready GPU-accelerated approximate nearest neighbor (ANN) search engine built with CUDA 12.8 and C++20. The system efficiently computes top-k cosine similarity searches across large vector databases using shared-memory tiling, warp-level reductions, and occupancy-aware block sizing. The architecture includes production infrastructure for memory management, logging, configuration, and containerization.
 
 ## High-Level Architecture
 
@@ -12,6 +12,13 @@ graph TB
     API --> ANN[HyperdriveANN Class]
     ANN --> GPU[GPU Kernels]
     GPU --> CUDA[CUDA Runtime]
+    
+    subgraph "Production Infrastructure"
+        CONFIG[Configuration System]
+        LOG[Logging System]
+        MEM[Memory Pool]
+        QUANT[Vector Quantization]
+    end
     
     subgraph "Data Flow"
         DB[(Database Vectors)]
@@ -26,9 +33,14 @@ graph TB
         GPU --> TOP[Top-K Kernel]
         SIM --> TOP
     end
+    
+    CONFIG --> ANN
+    LOG --> ANN
+    MEM --> ANN
+    QUANT --> ANN
 ```
 
-The system follows a layered architecture where the CLI interface provides user interaction, the C++ API offers programmatic access, and the GPU kernels handle the computationally intensive similarity computations. Data flows from input vectors through the ANN engine to produce ranked similarity results.
+The system follows a layered architecture where the CLI interface provides user interaction, the C++ API offers programmatic access, and the GPU kernels handle the computationally intensive similarity computations. The production infrastructure layer provides configuration management, logging, memory pool management, and vector quantization capabilities. Data flows from input vectors through the ANN engine to produce ranked similarity results.
 
 ## CUDA Kernel Architecture
 
@@ -103,3 +115,20 @@ sequenceDiagram
 ```
 
 The data flow follows an asynchronous pattern where data is copied to GPU memory, processed through specialized kernels, and results are copied back to host memory. Each kernel is optimized for specific operations: similarity computation focuses on memory bandwidth utilization while top-k selection emphasizes shared memory sorting efficiency.
+
+## Production Infrastructure
+
+### Configuration Management
+The system uses YAML-based configuration files for runtime parameter tuning. Configuration includes memory settings, performance parameters, algorithm options, and logging preferences. The configuration system supports hot-reloading and validation of parameters.
+
+### Memory Pool Management
+A custom memory pool implementation manages GPU memory allocation and deallocation efficiently. The pool reduces memory fragmentation and provides better memory utilization through block reuse and stream-aware allocation.
+
+### Logging System
+Comprehensive logging infrastructure with multiple log levels (DEBUG, INFO, WARN, ERROR, FATAL). The system supports both console and file output with configurable formatting and automatic log rotation.
+
+### Vector Quantization
+Support for INT8 and INT4 vector quantization to reduce memory usage and improve performance. The quantization system includes automatic parameter computation and dequantization for maintaining search accuracy.
+
+### Containerization
+Docker support with NVIDIA GPU runtime for easy deployment and scaling. The containerization includes multi-service orchestration with Docker Compose for different deployment scenarios.

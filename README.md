@@ -4,13 +4,21 @@ GPU-accelerated approximate nearest neighbor search engine using CUDA 12.8 and C
 
 ## Features
 
+### Core Engine
 - GPU-accelerated cosine similarity computation using CUDA kernels
 - Shared memory tiling for optimal memory bandwidth utilization
 - Warp-level reductions for efficient parallel dot product computation
 - Occupancy-aware block sizing for maximum GPU utilization
 - Batch processing of multiple queries
 - CPU baseline for performance comparison
-- Comprehensive benchmarking suite
+
+### Production Infrastructure
+- Memory pool management for efficient GPU memory allocation
+- Comprehensive logging system with multiple levels
+- YAML-based configuration management
+- Vector quantization support (INT8/INT4)
+- Docker containerization with NVIDIA GPU support
+- Interactive CLI with performance rating system
 
 ## Status
 
@@ -20,10 +28,16 @@ NO CONTRIBUTIONS ACCEPTED - Please do not submit pull requests or issues at this
 
 ## Prerequisites
 
+### Required
 - CUDA 12.8 or later
 - CUB library (CUDA C++ Unbound)
 - CMake 3.20 or later
 - C++20 compatible compiler
+
+### Optional (for production features)
+- Docker with NVIDIA GPU support
+- YAML-CPP library
+- pybind11 (for Python bindings)
 
 ## Quick Start
 
@@ -88,18 +102,33 @@ ann.initialize(dbCount,dim,queryCount,k,tileSize);
 auto results=ann.topK(db,dbCount,dim,queries,queryCount,k);
 ```
 
-## Requirements
+## Docker Support
 
-- CUDA 12.8+
-- CUB library
-- CMake 3.20+
-- C++20 compiler
+```bash
+# Build and run with Docker
+docker-compose up --build
+
+# Run specific services
+docker-compose run hyperdrive-benchmark
+docker-compose run hyperdrive-test
+```
+
+## Performance
+
+### RTX 4060 Laptop GPU Results
+- **Database**: 1M vectors × 128 dimensions
+- **Queries**: 16 vectors
+- **GPU Time**: ~7.7 ms per query
+- **CPU Time**: ~479 ms per query
+- **Speedup**: **62x faster**
+- **Rating**: GOOD performance
 
 ## Troubleshooting
 
 **Build fails:** Check CUDA installation and CUB library
 **GPU not found:** Verify with `nvidia-smi`
 **Poor performance:** Try `--tile-size 512`
+**Memory issues:** Enable quantization in config
 
 ## License
 
